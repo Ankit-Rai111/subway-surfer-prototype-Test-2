@@ -1,0 +1,2523 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Subway Runner 3D</title>
+
+<style>
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0b0b12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden;
+}
+
+#wrap {
+    position: relative;
+}
+
+canvas {
+    background: #87ceeb;
+    display: block;
+    border-radius: 8px;
+    box-shadow: 0 0 50px rgba(0,0,0,0.7);
+}
+
+#hint {
+    position: absolute;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: white;
+    font-size: 13px;
+    text-shadow: 0 1px 2px black;
+    pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+
+<div id="wrap">
+<canvas id="game" width="480" height="720"></canvas>
+
+<div id="hint">
+    Arrows / WASD = Move |
+    Up / Space = Jump |
+    Down = Slide |
+    R = Restart
+</div>
+</div>
+
+<script>
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+
+const CENTER_X = WIDTH / 2;
+const HORIZON_Y = 205;
+const GROUND_Y = HEIGHT - 70;
+
+const ROAD_HALF_NEAR = 165;
+
+const Z_NEAR = 1;
+const Z_FAR = 24;
+
+const LANE_OFFSETS = [-1, 0, 1];
+
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+}
+
+function scaleAt(z) {
+    return Z_NEAR / z;
+}
+
+function project(laneOffset, z) {
+
+    const s = scaleAt(z);
+
+    return {
+        x: CENTER_X + laneOffset * ROAD_HALF_NEAR * s,
+        y: HORIZON_Y +
+           (GROUND_Y - HORIZON_Y) * s,
+        scale: s
+    };
+}
+
+
+// ============================================================
+// COLORS
+// ============================================================
+
+const COL = {
+
+    skyTop: "#2f6fb0",
+    skyMid: "#6ea9d6",
+    skyLow: "#cfe6ef",
+
+    sun: "#fff6d8",
+
+    buildingFar: "#606c84",
+    buildingMid: "#46546e",
+    buildingNear: "#2e384e",
+
+    windowLit: "#ffdd88",
+
+    ballast: "#6b6559",
+    ballastDark: "#4a463d",
+
+    rail: "#c9cdd3",
+    railShine: "#f4f6f8",
+    railDark: "#5a5e64",
+
+    tieLight: "#5b4633",
+    tieDark: "#382a1e",
+
+    pillar: "#5a4632",
+    pillarLight: "#7a6244",
+
+    coinCore: "#fff6c0",
+    coinMid: "#ffd23c",
+    coinEdge: "#a9760a",
+
+    shirt: "#c0392b",
+    shirtDark: "#7a2016",
+    shirtLight: "#e8574a",
+
+    skin: "#e8ab7c",
+    skinDark: "#b9825a",
+
+    hair: "#2b1f18",
+
+    pants: "#26314f",
+    pantsDark: "#161d33",
+
+    shoe: "#20201f",
+
+    blockA: "#8a6a3d",
+    blockB: "#6a4f28",
+    blockC: "#4d3818",
+
+    trainA: "#57657f",
+    trainB: "#3a4457",
+    trainC: "#262e3c",
+
+    lowA: "#b23a3a",
+    lowB: "#8c2929",
+    lowC: "#651c1c",
+
+    hazardY: "#f2c31c",
+    hazardK: "#1c1c1c"
+};
+
+
+// ============================================================
+// CLOUDS
+// ============================================================
+
+let clouds = [];
+
+function initClouds() {
+
+    clouds = [];
+
+    for (let i = 0; i < 7; i++) {
+
+        clouds.push({
+            x: Math.random() * WIDTH,
+            y: 40 + Math.random() * 100,
+            r: 25 + Math.random() * 35,
+            speed: 0.1 + Math.random() * 0.2
+        });
+    }
+}
+
+function drawCloud(x, y, r) {
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+        x,
+        y,
+        r,
+        r * 0.55,
+        0,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.ellipse(
+        x + r * 0.6,
+        y + r * 0.1,
+        r * 0.7,
+        r * 0.45,
+        0,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.ellipse(
+        x - r * 0.6,
+        y + r * 0.12,
+        r * 0.6,
+        r * 0.4,
+        0,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+}
+
+
+// ============================================================
+// SKY
+// ============================================================
+
+function drawSky() {
+
+    const grad = ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        HORIZON_Y + 60
+    );
+
+    grad.addColorStop(0, COL.skyTop);
+    grad.addColorStop(0.55, COL.skyMid);
+    grad.addColorStop(1, COL.skyLow);
+
+    ctx.fillStyle = grad;
+
+    ctx.fillRect(
+        0,
+        0,
+        WIDTH,
+        HORIZON_Y + 60
+    );
+
+
+    // Sun
+
+    const sunX = WIDTH - 90;
+    const sunY = 95;
+
+    const glow = ctx.createRadialGradient(
+        sunX,
+        sunY,
+        0,
+        sunX,
+        sunY,
+        90
+    );
+
+    glow.addColorStop(
+        0,
+        "rgba(255,246,216,0.8)"
+    );
+
+    glow.addColorStop(
+        1,
+        "rgba(255,246,216,0)"
+    );
+
+    ctx.fillStyle = glow;
+
+    ctx.beginPath();
+
+    ctx.arc(
+        sunX,
+        sunY,
+        90,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = COL.sun;
+
+    ctx.beginPath();
+
+    ctx.arc(
+        sunX,
+        sunY,
+        34,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+
+    // Clouds
+
+    ctx.fillStyle =
+        "rgba(255,255,255,0.72)";
+
+    clouds.forEach(c => {
+
+        c.x -= c.speed;
+
+        if (c.x < -100) {
+            c.x = WIDTH + 100;
+        }
+
+        drawCloud(
+            c.x,
+            c.y,
+            c.r
+        );
+    });
+
+
+    // Horizon haze
+
+    const haze = ctx.createLinearGradient(
+        0,
+        HORIZON_Y - 40,
+        0,
+        HORIZON_Y + 20
+    );
+
+    haze.addColorStop(
+        0,
+        "rgba(207,230,239,0)"
+    );
+
+    haze.addColorStop(
+        1,
+        "rgba(207,230,239,0.9)"
+    );
+
+    ctx.fillStyle = haze;
+
+    ctx.fillRect(
+        0,
+        HORIZON_Y - 40,
+        WIDTH,
+        60
+    );
+}
+
+
+// ============================================================
+// BUILDINGS
+// ============================================================
+
+function drawBuildings() {
+
+    const buildings = [
+
+        [0, 125, 70, 100, COL.buildingFar],
+        [65, 145, 65, 80, COL.buildingMid],
+        [125, 115, 75, 110, COL.buildingFar],
+        [200, 140, 65, 85, COL.buildingMid],
+        [265, 120, 75, 105, COL.buildingNear],
+        [340, 145, 65, 80, COL.buildingMid],
+        [405, 110, 75, 115, COL.buildingNear]
+
+    ];
+
+    buildings.forEach(b => {
+
+        const x = b[0];
+        const y = b[1];
+        const w = b[2];
+        const h = b[3];
+        const color = b[4];
+
+        ctx.fillStyle = color;
+
+        ctx.fillRect(
+            x,
+            y,
+            w,
+            h
+        );
+
+
+        // Windows
+
+        for (
+            let wx = x + 10;
+            wx < x + w - 5;
+            wx += 18
+        ) {
+
+            for (
+                let wy = y + 12;
+                wy < y + h - 8;
+                wy += 22
+            ) {
+
+                ctx.fillStyle =
+                    Math.random() > 0.25
+                    ? COL.windowLit
+                    : "rgba(20,25,40,0.5)";
+
+                ctx.fillRect(
+                    wx,
+                    wy,
+                    7,
+                    9
+                );
+            }
+        }
+    });
+}
+
+
+// ============================================================
+// TRACK
+// ============================================================
+
+function drawTrack() {
+
+    // Main ground
+
+    ctx.fillStyle = COL.ballast;
+
+    ctx.beginPath();
+
+    ctx.moveTo(0, HORIZON_Y);
+    ctx.lineTo(WIDTH, HORIZON_Y);
+    ctx.lineTo(WIDTH, HEIGHT);
+    ctx.lineTo(0, HEIGHT);
+
+    ctx.closePath();
+
+    ctx.fill();
+
+
+    // Left dark side
+
+    ctx.fillStyle = COL.ballastDark;
+
+    ctx.beginPath();
+
+    ctx.moveTo(0, HORIZON_Y);
+    ctx.lineTo(CENTER_X - 25, HORIZON_Y);
+    ctx.lineTo(CENTER_X - 120, HEIGHT);
+    ctx.lineTo(0, HEIGHT);
+
+    ctx.closePath();
+
+    ctx.fill();
+
+
+    // Right dark side
+
+    ctx.beginPath();
+
+    ctx.moveTo(CENTER_X + 25, HORIZON_Y);
+    ctx.lineTo(WIDTH, HORIZON_Y);
+    ctx.lineTo(WIDTH, HEIGHT);
+    ctx.lineTo(CENTER_X + 120, HEIGHT);
+
+    ctx.closePath();
+
+    ctx.fill();
+
+
+    // Rails
+
+    [-0.72, 0, 0.72].forEach(offset => {
+
+        const top = project(offset, Z_FAR);
+        const bottom = project(offset, Z_NEAR);
+
+        ctx.strokeStyle = COL.railDark;
+        ctx.lineWidth = 6;
+
+        ctx.beginPath();
+
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(bottom.x, bottom.y);
+
+        ctx.stroke();
+
+
+        ctx.strokeStyle = COL.railShine;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+
+        ctx.moveTo(top.x, top.y);
+        ctx.lineTo(bottom.x, bottom.y);
+
+        ctx.stroke();
+    });
+
+
+    // Wooden sleepers
+
+    for (
+        let z = Z_FAR;
+        z > Z_NEAR;
+        z -= 0.75
+    ) {
+
+        const left = project(-1.25, z);
+        const right = project(1.25, z);
+
+        ctx.strokeStyle = COL.tieDark;
+
+        ctx.lineWidth =
+            Math.max(
+                1,
+                7 * left.scale
+            );
+
+        ctx.beginPath();
+
+        ctx.moveTo(left.x, left.y);
+        ctx.lineTo(right.x, right.y);
+
+        ctx.stroke();
+    }
+}
+
+
+// ============================================================
+// HAZARD STRIPE
+// ============================================================
+
+function drawHazardStripe(
+    x,
+    y,
+    w,
+    h,
+    scale
+) {
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.rect(
+        x,
+        y,
+        w,
+        h
+    );
+
+    ctx.clip();
+
+    ctx.fillStyle = COL.hazardY;
+
+    ctx.fillRect(
+        x,
+        y,
+        w,
+        h
+    );
+
+    ctx.fillStyle = COL.hazardK;
+
+    const stripeW =
+        Math.max(
+            4,
+            10 * scale
+        );
+
+    for (
+        let sx = x - h;
+        sx < x + w + h;
+        sx += stripeW * 2
+    ) {
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+            sx,
+            y + h
+        );
+
+        ctx.lineTo(
+            sx + h,
+            y
+        );
+
+        ctx.lineTo(
+            sx + h + stripeW,
+            y
+        );
+
+        ctx.lineTo(
+            sx + stripeW,
+            y + h
+        );
+
+        ctx.closePath();
+
+        ctx.fill();
+    }
+
+    ctx.restore();
+}
+
+
+// ============================================================
+// 3D BOX
+// ============================================================
+
+function drawBox3D(
+    cx,
+    baseY,
+    s,
+    width,
+    height,
+    depth,
+    topColor,
+    frontColor,
+    sideColor
+) {
+
+    const w = width * s;
+    const h = height * s;
+    const d = depth * s;
+
+    const x0 = cx - w / 2;
+    const x1 = cx + w / 2;
+
+    const top = baseY - h;
+
+
+    // Front
+
+    const frontGrad =
+        ctx.createLinearGradient(
+            x0,
+            top,
+            x1,
+            top
+        );
+
+    frontGrad.addColorStop(
+        0,
+        frontColor
+    );
+
+    frontGrad.addColorStop(
+        0.5,
+        "#a17d49"
+    );
+
+    frontGrad.addColorStop(
+        1,
+        frontColor
+    );
+
+    ctx.fillStyle = frontGrad;
+
+    ctx.fillRect(
+        x0,
+        top,
+        w,
+        h
+    );
+
+
+    // Top
+
+    ctx.fillStyle = topColor;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        x0,
+        top
+    );
+
+    ctx.lineTo(
+        x0 + d * 0.4,
+        top - d * 0.7
+    );
+
+    ctx.lineTo(
+        x1 + d * 0.4,
+        top - d * 0.7
+    );
+
+    ctx.lineTo(
+        x1,
+        top
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+
+    // Side
+
+    ctx.fillStyle = sideColor;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        x1,
+        top
+    );
+
+    ctx.lineTo(
+        x1 + d * 0.4,
+        top - d * 0.7
+    );
+
+    ctx.lineTo(
+        x1 + d * 0.4,
+        baseY - d * 0.7
+    );
+
+    ctx.lineTo(
+        x1,
+        baseY
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+
+    return {
+        x0,
+        x1,
+        top,
+        baseY,
+        w,
+        h
+    };
+}
+
+
+// ============================================================
+// PARTICLE
+// ============================================================
+
+class Particle {
+
+    constructor(x, y) {
+
+        this.x = x;
+        this.y = y;
+
+        this.vx =
+            (Math.random() - 0.5) * 1.5;
+
+        this.vy =
+            -Math.random() * 1.2 - 0.3;
+
+        this.life = 20;
+
+        this.maxLife = 20;
+
+        this.size =
+            2 + Math.random() * 3;
+    }
+
+    update() {
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        this.vy += 0.05;
+
+        this.life--;
+    }
+
+    draw() {
+
+        const a =
+            this.life / this.maxLife;
+
+        ctx.fillStyle =
+            `rgba(190,180,160,${a * 0.6})`;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            this.x,
+            this.y,
+            this.size * a,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+    }
+
+    get dead() {
+        return this.life <= 0;
+    }
+}
+
+
+// ============================================================
+// PLAYER
+// ============================================================
+
+class Player {
+
+    constructor() {
+
+        this.lane = 1;
+
+        this.laneOffset =
+            LANE_OFFSETS[this.lane];
+
+        this.isJumping = false;
+
+        this.jumpT = 0;
+
+        this.jumpDuration = 34;
+
+        this.jumpHeight = 130;
+
+        this.isSliding = false;
+
+        this.slideTimer = 0;
+
+        this.slideDuration = 28;
+
+        this.runPhase = 0;
+
+        this.tilt = 0;
+
+        this.particleTimer = 0;
+    }
+
+
+    moveLeft() {
+
+        if (this.lane > 0) {
+            this.lane--;
+        }
+    }
+
+
+    moveRight() {
+
+        if (this.lane < 2) {
+            this.lane++;
+        }
+    }
+
+
+    jump() {
+
+        if (
+            !this.isJumping &&
+            !this.isSliding
+        ) {
+
+            this.isJumping = true;
+
+            this.jumpT = 0;
+        }
+    }
+
+
+    slide() {
+
+        if (
+            !this.isJumping &&
+            !this.isSliding
+        ) {
+
+            this.isSliding = true;
+
+            this.slideTimer =
+                this.slideDuration;
+        }
+    }
+
+
+    update(speed, particles) {
+
+        const target =
+            LANE_OFFSETS[this.lane];
+
+        const diff =
+            target - this.laneOffset;
+
+        this.tilt = diff * -16;
+
+        this.laneOffset +=
+            diff * 0.28;
+
+
+        // Jump
+
+        if (this.isJumping) {
+
+            this.jumpT +=
+                1 / this.jumpDuration;
+
+            if (this.jumpT >= 1) {
+
+                this.jumpT = 0;
+
+                this.isJumping = false;
+            }
+        }
+
+
+        // Slide
+
+        if (this.isSliding) {
+
+            this.slideTimer--;
+
+            if (this.slideTimer <= 0) {
+
+                this.isSliding = false;
+            }
+        }
+
+
+        // Running animation
+
+        this.runPhase +=
+            0.35 * speed;
+
+
+        // Dust
+
+        if (!this.isJumping) {
+
+            this.particleTimer++;
+
+            if (this.particleTimer >= 5) {
+
+                this.particleTimer = 0;
+
+                const p =
+                    project(
+                        this.laneOffset,
+                        Z_NEAR
+                    );
+
+                particles.push(
+                    new Particle(
+                        p.x +
+                        (Math.random() - 0.5) * 25,
+                        p.y - 4
+                    )
+                );
+            }
+        }
+    }
+
+
+    getJumpLift() {
+
+        if (!this.isJumping) {
+            return 0;
+        }
+
+        return (
+            Math.sin(
+                this.jumpT * Math.PI
+            ) * this.jumpHeight
+        );
+    }
+
+
+    getHeightState() {
+
+        if (this.isSliding) {
+            return "low";
+        }
+
+        if (
+            this.isJumping &&
+            this.jumpT > 0.18 &&
+            this.jumpT < 0.82
+        ) {
+            return "high";
+        }
+
+        return "normal";
+    }
+
+
+    draw() {
+
+        const p =
+            project(
+                this.laneOffset,
+                Z_NEAR
+            );
+
+        const lift =
+            this.getJumpLift();
+
+        const feetY =
+            p.y - lift;
+
+        const s =
+            p.scale;
+
+
+        // Shadow
+
+        ctx.save();
+
+        ctx.translate(
+            p.x,
+            p.y
+        );
+
+        ctx.scale(
+            1,
+            0.25
+        );
+
+        const shadow =
+            ctx.createRadialGradient(
+                0,
+                0,
+                0,
+                0,
+                0,
+                45 * s
+            );
+
+        shadow.addColorStop(
+            0,
+            "rgba(0,0,0,0.4)"
+        );
+
+        shadow.addColorStop(
+            1,
+            "rgba(0,0,0,0)"
+        );
+
+        ctx.fillStyle = shadow;
+
+        ctx.beginPath();
+
+        ctx.ellipse(
+            0,
+            0,
+            45 * s,
+            45 * s,
+            0,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+
+        ctx.restore();
+
+
+        // Character scale
+
+        const bodyScale =
+            s *
+            (this.isSliding ? 0.65 : 1);
+
+        ctx.save();
+
+        ctx.translate(
+            p.x,
+            feetY
+        );
+
+        ctx.rotate(
+            this.tilt * Math.PI / 180
+        );
+
+        ctx.scale(
+            bodyScale,
+            bodyScale
+        );
+
+
+        const run =
+            Math.sin(this.runPhase);
+
+
+        if (this.isSliding) {
+
+            // Sliding pants
+
+            ctx.fillStyle =
+                COL.pants;
+
+            roundRect(
+                -35,
+                -35,
+                70,
+                30,
+                10
+            );
+
+
+            // Shirt
+
+            ctx.fillStyle =
+                COL.shirt;
+
+            roundRect(
+                -30,
+                -60,
+                50,
+                28,
+                10
+            );
+
+
+            // Head
+
+            ctx.fillStyle =
+                COL.skin;
+
+            ctx.beginPath();
+
+            ctx.arc(
+                25,
+                -50,
+                14,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+
+
+            // Hair
+
+            ctx.fillStyle =
+                COL.hair;
+
+            ctx.beginPath();
+
+            ctx.arc(
+                25,
+                -57,
+                13,
+                Math.PI,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+
+        } else {
+
+            const legSwing =
+                this.isJumping
+                ? 20
+                : run * 22;
+
+
+            // Back leg
+
+            ctx.strokeStyle =
+                COL.pantsDark;
+
+            ctx.lineWidth = 15;
+
+            ctx.lineCap = "round";
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                8,
+                -60
+            );
+
+            ctx.lineTo(
+                8 + legSwing * 0.5,
+                0
+            );
+
+            ctx.stroke();
+
+
+            // Back shoe
+
+            ctx.strokeStyle =
+                COL.shoe;
+
+            ctx.lineWidth = 10;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                8 + legSwing * 0.5,
+                0
+            );
+
+            ctx.lineTo(
+                8 + legSwing * 0.65,
+                6
+            );
+
+            ctx.stroke();
+
+
+            // Front leg
+
+            ctx.strokeStyle =
+                COL.pants;
+
+            ctx.lineWidth = 16;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                -8,
+                -60
+            );
+
+            ctx.lineTo(
+                -8 - legSwing * 0.5,
+                0
+            );
+
+            ctx.stroke();
+
+
+            // Front shoe
+
+            ctx.strokeStyle =
+                COL.shoe;
+
+            ctx.lineWidth = 11;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                -8 - legSwing * 0.5,
+                0
+            );
+
+            ctx.lineTo(
+                -8 - legSwing * 0.65,
+                6
+            );
+
+            ctx.stroke();
+
+
+            // Arms
+
+            const armSwing =
+                this.isJumping
+                ? -26
+                : -run * 20;
+
+            ctx.strokeStyle =
+                COL.skinDark;
+
+            ctx.lineWidth = 9;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                14,
+                -108
+            );
+
+            ctx.lineTo(
+                14 - armSwing * 0.6,
+                -60
+            );
+
+            ctx.stroke();
+
+
+            ctx.strokeStyle =
+                COL.skin;
+
+            ctx.lineWidth = 10;
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                -14,
+                -108
+            );
+
+            ctx.lineTo(
+                -14 + armSwing * 0.6,
+                -60
+            );
+
+            ctx.stroke();
+
+
+            // Body
+
+            const shirtGrad =
+                ctx.createLinearGradient(
+                    -24,
+                    0,
+                    24,
+                    0
+                );
+
+            shirtGrad.addColorStop(
+                0,
+                COL.shirtDark
+            );
+
+            shirtGrad.addColorStop(
+                0.5,
+                COL.shirt
+            );
+
+            shirtGrad.addColorStop(
+                1,
+                COL.shirtLight
+            );
+
+            ctx.fillStyle =
+                shirtGrad;
+
+            roundRect(
+                -24,
+                -120,
+                48,
+                62,
+                14
+            );
+
+
+            // Head
+
+            const headGrad =
+                ctx.createRadialGradient(
+                    -6,
+                    -140,
+                    3,
+                    0,
+                    -136,
+                    22
+                );
+
+            headGrad.addColorStop(
+                0,
+                COL.skin
+            );
+
+            headGrad.addColorStop(
+                1,
+                COL.skinDark
+            );
+
+            ctx.fillStyle =
+                headGrad;
+
+            ctx.beginPath();
+
+            ctx.arc(
+                0,
+                -136,
+                20,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+
+
+            // Hair
+
+            ctx.fillStyle =
+                COL.hair;
+
+            ctx.beginPath();
+
+            ctx.arc(
+                0,
+                -144,
+                19,
+                Math.PI,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+
+
+            // Eyes
+
+            ctx.fillStyle =
+                "#211914";
+
+            ctx.beginPath();
+
+            ctx.arc(
+                -6,
+                -136,
+                1.6,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+
+            ctx.beginPath();
+
+            ctx.arc(
+                6,
+                -136,
+                1.6,
+                0,
+                Math.PI * 2
+            );
+
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+}
+
+
+// ============================================================
+// ROUNDED RECTANGLE
+// ============================================================
+
+function roundRect(
+    x,
+    y,
+    w,
+    h,
+    r
+) {
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        x + r,
+        y
+    );
+
+    ctx.arcTo(
+        x + w,
+        y,
+        x + w,
+        y + h,
+        r
+    );
+
+    ctx.arcTo(
+        x + w,
+        y + h,
+        x,
+        y + h,
+        r
+    );
+
+    ctx.arcTo(
+        x,
+        y + h,
+        x,
+        y,
+        r
+    );
+
+    ctx.arcTo(
+        x,
+        y,
+        x + w,
+        y,
+        r
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+}
+
+
+// ============================================================
+// OBSTACLE
+// ============================================================
+
+class Obstacle {
+
+    constructor(lane, kind) {
+
+        this.lane = lane;
+
+        this.kind = kind;
+
+        this.z = Z_FAR;
+
+        this.resolved = false;
+
+
+        if (kind === "block") {
+
+            this.width = 70;
+            this.height = 60;
+            this.depth = 60;
+
+        } else if (kind === "low") {
+
+            this.width = 90;
+            this.height = 34;
+            this.depth = 50;
+
+            this.floatGap = 95;
+
+        } else {
+
+            this.width = 92;
+            this.height = 190;
+            this.depth = 90;
+        }
+    }
+
+
+    update(speed) {
+
+        this.z -= speed;
+    }
+
+
+    draw() {
+
+        if (
+            this.z > Z_FAR + 1 ||
+            this.z < Z_NEAR - 1.5
+        ) {
+            return;
+        }
+
+
+        const z =
+            Math.max(
+                this.z,
+                0.3
+            );
+
+        const p =
+            project(
+                LANE_OFFSETS[this.lane],
+                z
+            );
+
+        let baseY = p.y;
+
+
+        if (this.kind === "low") {
+
+            baseY -=
+                this.floatGap * p.scale;
+        }
+
+
+        if (this.kind === "block") {
+
+            const box =
+                drawBox3D(
+                    p.x,
+                    baseY,
+                    p.scale,
+                    this.width,
+                    this.height,
+                    this.depth,
+                    COL.blockA,
+                    COL.blockB,
+                    COL.blockC
+                );
+
+
+            // Wood lines
+
+            ctx.strokeStyle =
+                "rgba(0,0,0,0.3)";
+
+            ctx.lineWidth =
+                Math.max(
+                    1,
+                    1.5 * p.scale
+                );
+
+            for (
+                let i = 1;
+                i < 4;
+                i++
+            ) {
+
+                const yy =
+                    box.top +
+                    box.h / 4 * i;
+
+                ctx.beginPath();
+
+                ctx.moveTo(
+                    box.x0,
+                    yy
+                );
+
+                ctx.lineTo(
+                    box.x1,
+                    yy
+                );
+
+                ctx.stroke();
+            }
+
+        } else if (
+            this.kind === "train"
+        ) {
+
+            const box =
+                drawBox3D(
+                    p.x,
+                    baseY,
+                    p.scale,
+                    this.width,
+                    this.height,
+                    this.depth,
+                    COL.trainA,
+                    COL.trainB,
+                    COL.trainC
+                );
+
+
+            // Windows
+
+            const winY =
+                box.top +
+                box.h * 0.28;
+
+            const winH =
+                box.h * 0.22;
+
+
+            for (
+                let i = 0;
+                i < 3;
+                i++
+            ) {
+
+                const wx =
+                    box.x0 +
+                    box.w *
+                    (0.15 + i * 0.28);
+
+                ctx.fillStyle =
+                    "#f5d991";
+
+                ctx.fillRect(
+                    wx,
+                    winY,
+                    box.w * 0.16,
+                    winH
+                );
+            }
+
+
+            // Hazard stripe
+
+            drawHazardStripe(
+                box.x0,
+                box.baseY -
+                box.h * 0.14,
+                box.w,
+                box.h * 0.09,
+                p.scale
+            );
+
+
+            // Headlights
+
+            [
+                0.12,
+                0.88
+            ].forEach(f => {
+
+                const lx =
+                    box.x0 +
+                    box.w * f;
+
+                const ly =
+                    box.baseY -
+                    box.h * 0.08;
+
+                ctx.fillStyle =
+                    "#fff6cc";
+
+                ctx.beginPath();
+
+                ctx.arc(
+                    lx,
+                    ly,
+                    Math.max(
+                        2,
+                        4 * p.scale
+                    ),
+                    0,
+                    Math.PI * 2
+                );
+
+                ctx.fill();
+            });
+
+        } else {
+
+            // Posts
+
+            const postW =
+                8 * p.scale;
+
+
+            ctx.fillStyle =
+                COL.pillar;
+
+            ctx.fillRect(
+                p.x -
+                this.width * p.scale / 2 +
+                4 * p.scale,
+
+                baseY,
+
+                postW,
+
+                p.y - baseY
+            );
+
+
+            ctx.fillRect(
+                p.x +
+                this.width * p.scale / 2 -
+                12 * p.scale,
+
+                baseY,
+
+                postW,
+
+                p.y - baseY
+            );
+
+
+            const box =
+                drawBox3D(
+                    p.x,
+                    baseY,
+                    p.scale,
+                    this.width,
+                    this.height,
+                    this.depth,
+                    COL.lowA,
+                    COL.lowB,
+                    COL.lowC
+                );
+
+
+            drawHazardStripe(
+                box.x0,
+                box.top,
+                box.w,
+                box.h,
+                p.scale
+            );
+        }
+    }
+}
+
+
+// ============================================================
+// COIN
+// ============================================================
+
+class Coin {
+
+    constructor(lane, z) {
+
+        this.lane = lane;
+
+        this.z = z;
+
+        this.collected = false;
+
+        this.spin =
+            Math.random() *
+            Math.PI * 2;
+    }
+
+
+    update(speed) {
+
+        this.z -= speed;
+
+        this.spin += 0.25;
+    }
+
+
+    draw() {
+
+        if (this.collected) {
+            return;
+        }
+
+        if (
+            this.z > Z_FAR + 1 ||
+            this.z < Z_NEAR - 1.5
+        ) {
+            return;
+        }
+
+
+        const p =
+            project(
+                LANE_OFFSETS[this.lane],
+                Math.max(this.z, 0.3)
+            );
+
+
+        const y =
+            p.y -
+            70 * p.scale;
+
+
+        const rx =
+            Math.max(
+                2,
+                Math.abs(
+                    Math.cos(this.spin)
+                ) * 15 * p.scale
+            );
+
+        const ry =
+            15 * p.scale;
+
+
+        // Shadow
+
+        ctx.fillStyle =
+            "rgba(0,0,0,0.25)";
+
+        ctx.beginPath();
+
+        ctx.ellipse(
+            p.x,
+            p.y,
+            15 * p.scale,
+            4 * p.scale,
+            0,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+
+
+        // Coin
+
+        const grad =
+            ctx.createRadialGradient(
+                p.x - rx * 0.3,
+                y - ry * 0.3,
+                1,
+                p.x,
+                y,
+                Math.max(rx, ry)
+            );
+
+        grad.addColorStop(
+            0,
+            COL.coinCore
+        );
+
+        grad.addColorStop(
+            0.55,
+            COL.coinMid
+        );
+
+        grad.addColorStop(
+            1,
+            COL.coinEdge
+        );
+
+        ctx.fillStyle = grad;
+
+        ctx.beginPath();
+
+        ctx.ellipse(
+            p.x,
+            y,
+            rx,
+            ry,
+            0,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fill();
+
+
+        ctx.strokeStyle =
+            COL.coinEdge;
+
+        ctx.lineWidth =
+            Math.max(
+                1,
+                1.5 * p.scale
+            );
+
+        ctx.stroke();
+    }
+}
+
+
+// ============================================================
+// GAME STATE
+// ============================================================
+
+let player;
+
+let obstacles = [];
+
+let coins = [];
+
+let particles = [];
+
+let score = 0;
+
+let coinScore = 0;
+
+let speed = 0.18;
+
+let spawnTimer = 0;
+
+let coinTimer = 0;
+
+let gameOver = false;
+
+
+// ============================================================
+// RESET
+// ============================================================
+
+function resetGame() {
+
+    player = new Player();
+
+    obstacles = [];
+
+    coins = [];
+
+    particles = [];
+
+    score = 0;
+
+    coinScore = 0;
+
+    speed = 0.18;
+
+    spawnTimer = 0;
+
+    coinTimer = 0;
+
+    gameOver = false;
+}
+
+
+// ============================================================
+// SPAWN
+// ============================================================
+
+function spawnObstacle() {
+
+    const lane =
+        Math.floor(
+            Math.random() * 3
+        );
+
+    const types = [
+        "block",
+        "train",
+        "low"
+    ];
+
+    const kind =
+        types[
+            Math.floor(
+                Math.random() *
+                types.length
+            )
+        ];
+
+    obstacles.push(
+        new Obstacle(
+            lane,
+            kind
+        )
+    );
+}
+
+
+function spawnCoins() {
+
+    const lane =
+        Math.floor(
+            Math.random() * 3
+        );
+
+    for (
+        let i = 0;
+        i < 5;
+        i++
+    ) {
+
+        coins.push(
+            new Coin(
+                lane,
+                Z_FAR - i * 1.4
+            )
+        );
+    }
+}
+
+
+// ============================================================
+// COLLISION
+// ============================================================
+
+function checkCollision(
+    player,
+    obstacle
+) {
+
+    if (
+        obstacle.z > 2.0 ||
+        obstacle.z < 0.7
+    ) {
+        return false;
+    }
+
+
+    if (
+        player.lane !== obstacle.lane
+    ) {
+        return false;
+    }
+
+
+    const state =
+        player.getHeightState();
+
+
+    if (
+        obstacle.kind === "low"
+    ) {
+
+        return state !== "low";
+
+    } else {
+
+        return state !== "high";
+    }
+}
+
+
+// ============================================================
+// HUD
+// ============================================================
+
+function drawHUD() {
+
+    ctx.fillStyle =
+        "rgba(0,0,0,0.35)";
+
+    ctx.fillRect(
+        10,
+        10,
+        145,
+        75
+    );
+
+
+    ctx.fillStyle =
+        "white";
+
+    ctx.font =
+        "bold 22px Arial";
+
+    ctx.fillText(
+        "Score: " + score,
+        20,
+        38
+    );
+
+
+    ctx.fillStyle =
+        COL.coinMid;
+
+    ctx.fillText(
+        "Coins: " + coinScore,
+        20,
+        68
+    );
+}
+
+
+// ============================================================
+// GAME OVER
+// ============================================================
+
+function drawGameOver() {
+
+    ctx.fillStyle =
+        "rgba(0,0,0,0.65)";
+
+    ctx.fillRect(
+        0,
+        0,
+        WIDTH,
+        HEIGHT
+    );
+
+
+    ctx.textAlign =
+        "center";
+
+
+    ctx.fillStyle =
+        "white";
+
+    ctx.font =
+        "bold 46px Arial";
+
+    ctx.fillText(
+        "GAME OVER",
+        WIDTH / 2,
+        HEIGHT / 2 - 40
+    );
+
+
+    ctx.font =
+        "bold 24px Arial";
+
+    ctx.fillText(
+        "Score: " + score,
+        WIDTH / 2,
+        HEIGHT / 2 + 10
+    );
+
+
+    ctx.font =
+        "20px Arial";
+
+    ctx.fillText(
+        "Press R to restart",
+        WIDTH / 2,
+        HEIGHT / 2 + 55
+    );
+
+
+    ctx.textAlign =
+        "left";
+}
+
+
+// ============================================================
+// KEYBOARD
+// ============================================================
+
+document.addEventListener(
+    "keydown",
+    function(e) {
+
+        if (
+            [
+                "ArrowLeft",
+                "ArrowRight",
+                "ArrowUp",
+                "ArrowDown",
+                " ",
+                "a",
+                "d",
+                "w",
+                "s",
+                "r"
+            ].includes(e.key)
+        ) {
+            e.preventDefault();
+        }
+
+
+        if (
+            e.key === "r" ||
+            e.key === "R"
+        ) {
+
+            resetGame();
+
+            return;
+        }
+
+
+        if (gameOver) {
+            return;
+        }
+
+
+        if (
+            e.key === "ArrowLeft" ||
+            e.key === "a" ||
+            e.key === "A"
+        ) {
+
+            player.moveLeft();
+        }
+
+
+        if (
+            e.key === "ArrowRight" ||
+            e.key === "d" ||
+            e.key === "D"
+        ) {
+
+            player.moveRight();
+        }
+
+
+        if (
+            e.key === "ArrowUp" ||
+            e.key === "w" ||
+            e.key === "W" ||
+            e.key === " "
+        ) {
+
+            player.jump();
+        }
+
+
+        if (
+            e.key === "ArrowDown" ||
+            e.key === "s" ||
+            e.key === "S"
+        ) {
+
+            player.slide();
+        }
+    }
+);
+
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+
+function gameLoop() {
+
+    // Sky
+
+    drawSky();
+
+
+    // Buildings
+
+    drawBuildings();
+
+
+    // Track
+
+    drawTrack();
+
+
+    if (!gameOver) {
+
+        score++;
+
+        // Increase speed
+
+        speed += 0.000015;
+
+
+        // Player
+
+        player.update(
+            speed / 0.18,
+            particles
+        );
+
+
+        // Obstacles
+
+        spawnTimer++;
+
+        if (
+            spawnTimer >
+            Math.max(
+                45,
+                90 - speed * 120
+            )
+        ) {
+
+            spawnTimer = 0;
+
+            spawnObstacle();
+        }
+
+
+        // Coins
+
+        coinTimer++;
+
+        if (
+            coinTimer > 100
+        ) {
+
+            coinTimer = 0;
+
+            spawnCoins();
+        }
+
+
+        // Update obstacles
+
+        obstacles.forEach(
+            obstacle => {
+
+                obstacle.update(speed);
+
+                if (
+                    checkCollision(
+                        player,
+                        obstacle
+                    )
+                ) {
+
+                    gameOver = true;
+                }
+            }
+        );
+
+
+        // Update coins
+
+        coins.forEach(
+            coin => {
+
+                coin.update(speed);
+
+
+                if (
+                    coin.collected
+                ) {
+                    return;
+                }
+
+
+                if (
+                    coin.lane === player.lane &&
+                    coin.z > 0.75 &&
+                    coin.z < 1.7
+                ) {
+
+                    coin.collected = true;
+
+                    coinScore++;
+
+                    const p =
+                        project(
+                            LANE_OFFSETS[
+                                coin.lane
+                            ],
+                            coin.z
+                        );
+
+
+                    for (
+                        let i = 0;
+                        i < 8;
+                        i++
+                    ) {
+
+                        particles.push(
+                            new Particle(
+                                p.x,
+                                p.y - 70 * p.scale
+                            )
+                        );
+                    }
+                }
+            }
+        );
+
+
+        // Particles
+
+        particles.forEach(
+            p => p.update()
+        );
+
+
+        particles =
+            particles.filter(
+                p => !p.dead
+            );
+
+
+        // Remove objects
+
+        obstacles =
+            obstacles.filter(
+                o => o.z > 0.3
+            );
+
+
+        coins =
+            coins.filter(
+                c =>
+                    c.z > 0.3 &&
+                    !c.collected
+            );
+    }
+
+
+    // ========================================================
+    // DRAW OBJECTS BACK TO FRONT
+    // ========================================================
+
+    const objects = [];
+
+
+    obstacles.forEach(
+        o => {
+
+            objects.push({
+                z: o.z,
+                object: o
+            });
+        }
+    );
+
+
+    coins.forEach(
+        c => {
+
+            objects.push({
+                z: c.z,
+                object: c
+            });
+        }
+    );
+
+
+    objects.sort(
+        (a, b) =>
+            b.z - a.z
+    );
+
+
+    objects.forEach(
+        item => {
+
+            item.object.draw();
+        }
+    );
+
+
+    // Player
+
+    player.draw();
+
+
+    // Particles
+
+    particles.forEach(
+        p => p.draw()
+    );
+
+
+    // HUD
+
+    drawHUD();
+
+
+    if (gameOver) {
+
+        drawGameOver();
+    }
+
+
+    requestAnimationFrame(
+        gameLoop
+    );
+}
+
+
+// ============================================================
+// START
+// ============================================================
+
+initClouds();
+
+resetGame();
+
+gameLoop();
+
+</script>
+
+</body>
+</html>
+```
